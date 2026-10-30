@@ -1,3 +1,5 @@
+![Banner](banner.png)
+
 # dso-metadata-time-zone-normalizer
 Command-line tool to normalize timestamps in file metadata (e.g., EXIF data, creation dates) to a standard timezone (UTC). Prevents unintentional location revealing through timestamps. - Focused on Tools for sanitizing and obfuscating sensitive data within text files and structured data formats
 
