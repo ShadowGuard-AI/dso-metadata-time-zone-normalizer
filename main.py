@@ -137,21 +137,37 @@ def process_image_file(file_path, target_timezone, source_timezone, dry_run, ver
         return True
 
     # Write the updated values back with the Pillow API that exists in
-    # Pillow 10.x: mutate the Exif object (IFD0 tags directly, Exif IFD
-    # tags through get_ifd) and pass it to save as bytes.
+    # Pillow 10.x: set each tag on the Exif object itself and pass it to
+    # save as bytes. Tags 36867 and 36868 also get set through the Exif
+    # IFD mapping when the file carries one. The IFD mapping alone is
+    # not enough: on Pillow 10.2 get_ifd returns a plain dict whose
+    # changes never reach the saved file, so a run that only wrote
+    # there reported success while those two tags kept their old
+    # values on disk.
     try:
         exif = img.getexif()
-        exif_ifd = None
         for tag_id, new_value in updated_exif.items():
+            exif[tag_id] = new_value
             if tag_id in EXIF_IFD_TAGS:
-                if exif_ifd is None:
-                    exif_ifd = exif.get_ifd(0x8769)
-                exif_ifd[tag_id] = new_value
-            else:
-                exif[tag_id] = new_value
+                try:
+                    exif.get_ifd(0x8769)[tag_id] = new_value
+                except Exception:
+                    pass
         img.save(file_path, exif=exif.tobytes())
     except Exception as e:
         raise ProcessingError(f"Failed to save updated EXIF data in {file_path}: {e}")
+
+    # A save only counts when the new values read back from disk. If a
+    # tag did not persist, the run fails instead of reporting success.
+    try:
+        saved_exif = Image.open(file_path)._getexif() or {}
+    except Exception as e:
+        raise ProcessingError(f"Failed to read back EXIF data in {file_path} after saving: {e}")
+    for tag_id, new_value in updated_exif.items():
+        if saved_exif.get(tag_id) != new_value:
+            raise ProcessingError(
+                f"Save did not persist tag {ExifTags.TAGS.get(tag_id, tag_id)} in {file_path}"
+            )
     logging.info(f"Successfully updated EXIF data in {file_path}")
     return True
 
