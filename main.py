@@ -136,6 +136,15 @@ def process_image_file(file_path, target_timezone, source_timezone, dry_run, ver
         logging.info(f"Dry run: EXIF data would be updated in {file_path} with the following changes: {updated_exif}")
         return True
 
+    # Two side effects ride along with this save. Saving a JPEG through
+    # Pillow re-encodes the pixel data at the default quality, so a
+    # metadata only edit costs the photo a recompression it never asked
+    # for. And only the three datetime strings are shifted: the EXIF
+    # offset tags (OffsetTime and its Original and Digitized partners)
+    # are not in EXIF_DATETIME_TAGS, so they keep stating the old zone's
+    # offset beside the new wall clock time, and a reader that trusts the
+    # offset tags will place the photo differently from one that reads
+    # the datetime strings.
     # Write the updated values back with the Pillow API that exists in
     # Pillow 10.x: set each tag on the Exif object itself and pass it to
     # save as bytes. Tags 36867 and 36868 also get set through the Exif
@@ -202,6 +211,12 @@ def process_text_file(file_path, target_timezone, source_timezone, dry_run, verb
         if original in failures:
             return original
         output_format = None
+        # Format order is the disambiguation policy: the month first slash
+        # format stands ahead of the day first one in the list, so an
+        # ambiguous date like 05/06/2025 is read as May 6 and never tried
+        # as 5 June, silently and with nothing in the output marking the
+        # choice. The converted value is written back in the same format
+        # the match was read in, which at least keeps the shape stable.
         for fmt in TEXT_TIMESTAMP_FORMATS:
             try:
                 datetime.datetime.strptime(original, fmt)
@@ -211,6 +226,12 @@ def process_text_file(file_path, target_timezone, source_timezone, dry_run, verb
                 continue
         converted = None
         if output_format is not None:
+            # This call goes to convert_timestamp directly, not through
+            # the normalize_timestamp wrapper that swallows errors into
+            # None, so a timestamp inside a daylight saving gap or overlap
+            # in the source zone raises out of localize here, escapes the
+            # substitution, and ends the run as an unexpected error rather
+            # than joining the failures list like an unparseable string.
             converted = convert_timestamp(original, source_timezone, target_timezone, output_format)
         if converted is None:
             failures.append(original)
